@@ -136,6 +136,64 @@ app.use(
     },
   }),
 );
+
+// Serve RestrictPC download files
+const RESTRICT_PC_DIR = path.resolve(__dirname, "restrict-pc");
+
+if (!fs.existsSync(RESTRICT_PC_DIR)) {
+  fs.mkdirSync(RESTRICT_PC_DIR, { recursive: true });
+}
+
+app.get("/restrict-pc", (req, res) => {
+  res.redirect("/restrict-pc/");
+});
+
+app.get("/restrict-pc/", (req, res) => {
+  const files = fs.existsSync(RESTRICT_PC_DIR)
+    ? fs.readdirSync(RESTRICT_PC_DIR)
+    : [];
+
+  res.json({
+    ok: true,
+    message: "RestrictPC download folder is available",
+    folder: RESTRICT_PC_DIR,
+    files,
+    downloadUrl: "/restrict-pc/RestrictPC.zip",
+    directDownloadUrl: "/restrict-pc/download",
+  });
+});
+
+app.get("/restrict-pc/download", (req, res) => {
+  const filePath = path.join(RESTRICT_PC_DIR, "RestrictPC.zip");
+
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).json({
+      ok: false,
+      message: "RestrictPC.zip not found",
+      expectedPath: filePath,
+    });
+  }
+
+  return res.download(filePath, "RestrictPC.zip");
+});
+
+app.use(
+  "/restrict-pc",
+  express.static(RESTRICT_PC_DIR, {
+    setHeaders(res, filePath) {
+      if (filePath.endsWith(".zip")) {
+        res.setHeader("Content-Type", "application/zip");
+        res.setHeader(
+          "Content-Disposition",
+          'attachment; filename="RestrictPC.zip"',
+        );
+        res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+        res.setHeader("Pragma", "no-cache");
+        res.setHeader("Expires", "0");
+      }
+    },
+  }),
+);
 async function ensureSuperAdmin() {
   try {
     const existing = await User.findOne({ username: "cms_admin" });
