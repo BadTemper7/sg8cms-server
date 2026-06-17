@@ -131,11 +131,21 @@ export const registerLauncherTerminal = async (req, res) => {
             terminal.description ||
             `SG8 Launcher ${normalizeCode(nextCode)}`,
           active: true,
-          isOnline: true,
-          isLaunchedGame: true,
-          lastSeenAt: now,
-          lastLauncherOpenAt: now,
+          // Pairing or installer registration must not mark the launcher as running.
+          // The launcher becomes online only when the real runtime opens and sends
+          // /game-launched or heartbeat after boot.
+          isOnline: false,
+          isLaunchedGame: false,
+          lastSeenAt: null,
+          lastLauncherOpenAt: null,
+          lastLauncherCloseAt: now,
           pairedAt: terminal.pairedAt || now,
+          "lastStatus.isPlaying": false,
+          "lastStatus.videoUrl": "",
+          "lastStatus.positionSec": 0,
+          "lastStatus.hasError": false,
+          "lastStatus.displayId": null,
+          "lastStatus.mode": "installed",
           "lastStatus.updatedAt": now,
         },
         { new: true, runValidators: true },
@@ -154,18 +164,20 @@ export const registerLauncherTerminal = async (req, res) => {
         hostname: String(hostname || "").trim(),
         launcherVersion: String(launcherVersion || "").trim(),
         active: true,
-        isOnline: true,
-        isLaunchedGame: true,
-        lastSeenAt: now,
+        // Pairing creates the terminal record only. It does not mean the launcher app is running.
+        isOnline: false,
+        isLaunchedGame: false,
+        lastSeenAt: null,
         pairedAt: now,
-        lastLauncherOpenAt: now,
+        lastLauncherOpenAt: null,
+        lastLauncherCloseAt: now,
         lastStatus: {
           isPlaying: false,
           videoUrl: "",
           positionSec: 0,
           hasError: false,
           displayId: null,
-          mode: "promo",
+          mode: "installed",
           updatedAt: now,
         },
       });
@@ -175,7 +187,7 @@ export const registerLauncherTerminal = async (req, res) => {
     }
 
     const message = buildTerminalUpdateMessage(terminal, {
-      reason: created ? "launcher_registered" : "launcher_repaired",
+      reason: created ? "launcher_registered_inactive" : "launcher_repaired_inactive",
       outletChanged,
     });
 
@@ -274,8 +286,24 @@ export const updateGameLaunched = async (req, res) => {
     const updateData = {
       isLaunchedGame,
       ...(isLaunchedGame
-        ? { isOnline: true, lastSeenAt: new Date(), lastLauncherOpenAt: new Date() }
-        : { lastLauncherCloseAt: new Date() }),
+        ? {
+            isOnline: true,
+            lastSeenAt: new Date(),
+            lastLauncherOpenAt: new Date(),
+            "lastStatus.mode": "promo",
+            "lastStatus.updatedAt": new Date(),
+          }
+        : {
+            isOnline: false,
+            lastLauncherCloseAt: new Date(),
+            "lastStatus.isPlaying": false,
+            "lastStatus.videoUrl": "",
+            "lastStatus.positionSec": 0,
+            "lastStatus.hasError": false,
+            "lastStatus.displayId": null,
+            "lastStatus.mode": "offline",
+            "lastStatus.updatedAt": new Date(),
+          }),
     };
 
     const terminal = await Terminal.findByIdAndUpdate(
