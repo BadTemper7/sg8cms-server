@@ -269,7 +269,7 @@ ensureSuperAdmin()
         `⬆️  Launcher updates: http://localhost:${PORT}/launcher-updates/latest.yml\n`,
       );
 
-      startTerminalOfflineCheck();
+      // startTerminalOfflineCheck();
     });
   })
   .catch((error) => {
@@ -279,6 +279,6 @@ ensureSuperAdmin()
       console.log(
         `⬆️  Launcher updates: http://localhost:${PORT}/launcher-updates/latest.yml\n`,
       );
-      startTerminalOfflineCheck();
+      // startTerminalOfflineCheck();
     });
   });

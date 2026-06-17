@@ -1,8 +1,8 @@
 version: 1.0.0
 files:
   - url: SG8-Launcher-Setup-1.0.0.exe
-    sha512: 3TLNmqGeU7dZ57kHy1eT5uxIwHcYqThoIdXN6R6Fi8bkarlL3wFoirZYEWgleKik2++nGDW/Mos+6Lwt0otiXw==
-    size: 77056428
+    sha512: b7vu4y3nIaMqwZPhI2tOTS3Xrn6IA6YfM01jRDOWwRKaqPF8bXfWFRPjlw97Iz5xza1+whi4VwvURvi9zq2/4A==
+    size: 77056438
 path: SG8-Launcher-Setup-1.0.0.exe
-sha512: 3TLNmqGeU7dZ57kHy1eT5uxIwHcYqThoIdXN6R6Fi8bkarlL3wFoirZYEWgleKik2++nGDW/Mos+6Lwt0otiXw==
-releaseDate: '2026-06-16T07:06:21.675Z'
+sha512: b7vu4y3nIaMqwZPhI2tOTS3Xrn6IA6YfM01jRDOWwRKaqPF8bXfWFRPjlw97Iz5xza1+whi4VwvURvi9zq2/4A==
+releaseDate: '2026-06-17T02:35:38.254Z'
