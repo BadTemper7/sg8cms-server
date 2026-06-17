@@ -12,6 +12,15 @@ const __dirname = path.dirname(__filename);
 
 const VIDEO_UPLOAD_DIR = path.resolve(__dirname, "../videos/outlet");
 
+const PUBLIC_SERVER_URL = (
+  process.env.PUBLIC_SERVER_URL ||
+  process.env.SERVER_URL ||
+  "https://sg8cms-server.onrender.com"
+).replace(/\/$/, "");
+
+const getOutletVideoUrl = (filename) =>
+  `${PUBLIC_SERVER_URL}/videos/outlet/${filename}`;
+
 // Ensure the upload directory exists on startup
 if (!fs.existsSync(VIDEO_UPLOAD_DIR)) {
   fs.mkdirSync(VIDEO_UPLOAD_DIR, { recursive: true });
@@ -34,7 +43,7 @@ export const createVideo = async (req, res) => {
       description,
       filename,
       originalName,
-      secureUrl: `https://ws.sg8.casino/videos/outlet/${filename}`,
+      secureUrl: getOutletVideoUrl(filename),
       bytes: req.file.size,
       durationSec: 0,
       format: ext.replace(".", ""),
@@ -217,7 +226,7 @@ export const replaceVideo = async (req, res) => {
         }),
         filename,
         originalName,
-        secureUrl: `https://ws.sg8.casino/videos/outlet/${filename}`,
+        secureUrl: getOutletVideoUrl(filename),
         bytes: req.file.size,
         format: ext.replace(".", ""),
       },
