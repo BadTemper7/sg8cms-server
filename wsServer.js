@@ -45,12 +45,7 @@ function anyClientStillConnected(keys) {
   });
 }
 
-async function findTerminalForConnection({
-  deviceKey,
-  machineId,
-  deviceMongoId,
-  deviceCode,
-}) {
+async function findTerminalForConnection({ deviceKey, machineId, deviceMongoId, deviceCode }) {
   const ors = [];
 
   const identity = normalizeIdentity(deviceKey || machineId);
@@ -85,7 +80,12 @@ export function createWebSocketServer(server) {
     const token = url.searchParams.get("token");
     const isAdmin = url.searchParams.get("admin") === "true";
 
-    const connectionKeys = [deviceKey, machineId, deviceMongoId, deviceCode]
+    const connectionKeys = [
+      deviceKey,
+      machineId,
+      deviceMongoId,
+      deviceCode,
+    ]
       .map(toKey)
       .filter(Boolean);
 
@@ -111,12 +111,7 @@ export function createWebSocketServer(server) {
     } else if (connectionKeys.length) {
       connectionKeys.forEach((key) => addClientToKey(key, ws));
 
-      findTerminalForConnection({
-        deviceKey,
-        machineId,
-        deviceMongoId,
-        deviceCode,
-      })
+      findTerminalForConnection({ deviceKey, machineId, deviceMongoId, deviceCode })
         .then(async (terminal) => {
           if (!terminal) return;
 
@@ -150,12 +145,7 @@ export function createWebSocketServer(server) {
 
         if (anyClientStillConnected(connectionKeys)) return;
 
-        await findTerminalForConnection({
-          deviceKey,
-          machineId,
-          deviceMongoId,
-          deviceCode,
-        })
+        await findTerminalForConnection({ deviceKey, machineId, deviceMongoId, deviceCode })
           .then(async (terminal) => {
             if (!terminal) return;
 
@@ -205,8 +195,7 @@ export function createWebSocketServer(server) {
     ws.send(
       JSON.stringify({
         type: "WS_CONNECTED",
-        deviceKey:
-          deviceKey || machineId || deviceMongoId || deviceCode || null,
+        deviceKey: deviceKey || machineId || deviceMongoId || deviceCode || null,
         machineId: machineId || "",
         isAdmin,
         message: "Connected to WebSocket",
