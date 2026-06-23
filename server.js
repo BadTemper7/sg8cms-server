@@ -234,6 +234,16 @@ app.get("/api/health", (req, res) => {
   res.json({ message: "Backend is running" });
 });
 
+app.get("/api/ws-health", (req, res) => {
+  res.json({
+    ok: true,
+    message: "Native WebSocket server is mounted",
+    websocketPath: "/ws",
+    websocketUrl: "wss://ws2.sg8.casino/ws",
+    note: "Do not test this with /socket.io because this backend uses the ws package, not Socket.IO.",
+  });
+});
+
 // app.use("/api/users/login", loginLimiter);
 app.use("/api/notes", noteRoutes);
 app.use("/api/announcements", announcementRoutes);
@@ -321,7 +331,8 @@ ensureSuperAdmin()
       console.log(`\n🚀 Server running on port ${PORT}`);
       console.log(`🌍 Environment: ${process.env.NODE_ENV || "development"}`);
       console.log(`🔗 API URL: http://localhost:${PORT}/api`);
-      console.log(`❤️  Health check: http://localhost:${PORT}/api/health\n`);
+      console.log(`❤️  Health check: http://localhost:${PORT}/api/health`);
+      console.log(`🔌 WebSocket path: ws://localhost:${PORT}/ws\n`);
       console.log(`🕐 Server is using timezone: ${process.env.TZ}\n`);
       console.log(
         `⬆️  Launcher updates: http://localhost:${PORT}/launcher-updates/latest.yml\n`,

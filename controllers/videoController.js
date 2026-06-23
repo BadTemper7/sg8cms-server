@@ -15,7 +15,7 @@ const VIDEO_UPLOAD_DIR = path.resolve(__dirname, "../videos/outlet");
 const PUBLIC_SERVER_URL = (
   process.env.PUBLIC_SERVER_URL ||
   process.env.SERVER_URL ||
-  "https://sg8cms-server.onrender.com"
+  "https://ws2.sg8.casino"
 ).replace(/\/$/, "");
 
 const getOutletVideoUrl = (filename) =>

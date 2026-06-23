@@ -4,6 +4,9 @@ import mongoose from "mongoose";
 import Terminal from "./models/Terminal.js";
 
 let wss = null;
+let upgradeHandlerAttached = false;
+
+const WS_PATHS = new Set(["/ws", "/ws/"]);
 const clientsByDeviceKey = new Map();
 const adminClients = new Set();
 
@@ -45,7 +48,12 @@ function anyClientStillConnected(keys) {
   });
 }
 
-async function findTerminalForConnection({ deviceKey, machineId, deviceMongoId, deviceCode }) {
+async function findTerminalForConnection({
+  deviceKey,
+  machineId,
+  deviceMongoId,
+  deviceCode,
+}) {
   const ors = [];
 
   const identity = normalizeIdentity(deviceKey || machineId);
@@ -67,8 +75,39 @@ async function findTerminalForConnection({ deviceKey, machineId, deviceMongoId, 
   return Terminal.findOne({ $or: ors });
 }
 
+function isOpen(ws) {
+  return ws && ws.readyState === 1;
+}
+
 export function createWebSocketServer(server) {
-  wss = new WebSocketServer({ server });
+  if (!wss) {
+    wss = new WebSocketServer({ noServer: true });
+  }
+
+  if (!upgradeHandlerAttached) {
+    upgradeHandlerAttached = true;
+
+    server.on("upgrade", (req, socket, head) => {
+      let pathname = "";
+
+      try {
+        const url = new URL(req.url, "http://localhost");
+        pathname = url.pathname;
+      } catch (error) {
+        socket.destroy();
+        return;
+      }
+
+      if (!WS_PATHS.has(pathname)) {
+        socket.destroy();
+        return;
+      }
+
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        wss.emit("connection", ws, req);
+      });
+    });
+  }
 
   wss.on("connection", (ws, req) => {
     const url = new URL(req.url, "http://localhost");
@@ -80,16 +119,12 @@ export function createWebSocketServer(server) {
     const token = url.searchParams.get("token");
     const isAdmin = url.searchParams.get("admin") === "true";
 
-    const connectionKeys = [
-      deviceKey,
-      machineId,
-      deviceMongoId,
-      deviceCode,
-    ]
+    const connectionKeys = [deviceKey, machineId, deviceMongoId, deviceCode]
       .map(toKey)
       .filter(Boolean);
 
     console.log("[WS] client connected", {
+      path: url.pathname,
       deviceCode,
       deviceMongoId,
       deviceKey,
@@ -111,7 +146,12 @@ export function createWebSocketServer(server) {
     } else if (connectionKeys.length) {
       connectionKeys.forEach((key) => addClientToKey(key, ws));
 
-      findTerminalForConnection({ deviceKey, machineId, deviceMongoId, deviceCode })
+      findTerminalForConnection({
+        deviceKey,
+        machineId,
+        deviceMongoId,
+        deviceCode,
+      })
         .then(async (terminal) => {
           if (!terminal) return;
 
@@ -139,42 +179,51 @@ export function createWebSocketServer(server) {
           });
         })
         .catch(console.error);
-
-      ws.on("close", async () => {
-        connectionKeys.forEach((key) => removeClientFromKey(key, ws));
-
-        if (anyClientStillConnected(connectionKeys)) return;
-
-        await findTerminalForConnection({ deviceKey, machineId, deviceMongoId, deviceCode })
-          .then(async (terminal) => {
-            if (!terminal) return;
-
-            terminal.isOnline = false;
-            terminal.lastSeenAt = new Date();
-            await terminal.save();
-
-            broadcastToAdmins({
-              type: "TERMINAL_STATUS_UPDATE",
-              data: {
-                terminalId: terminal._id,
-                machineId: terminal.machineId || "",
-                deviceKey: terminal.deviceKey || "",
-                isOnline: false,
-                lastSeenAt: terminal.lastSeenAt,
-                updatedAt: new Date(),
-              },
-            });
-
-            broadcastToAdmins({
-              type: "DEVICE_WS",
-              action: "disconnected",
-              deviceKey: terminal.deviceKey || deviceKey || machineId || "",
-              machineId: terminal.machineId || machineId || "",
-            });
-          })
-          .catch(console.error);
-      });
     }
+
+    ws.on("close", async () => {
+      adminClients.delete(ws);
+
+      if (!connectionKeys.length) return;
+
+      connectionKeys.forEach((key) => removeClientFromKey(key, ws));
+
+      if (anyClientStillConnected(connectionKeys)) return;
+
+      await findTerminalForConnection({
+        deviceKey,
+        machineId,
+        deviceMongoId,
+        deviceCode,
+      })
+        .then(async (terminal) => {
+          if (!terminal) return;
+
+          terminal.isOnline = false;
+          terminal.lastSeenAt = new Date();
+          await terminal.save();
+
+          broadcastToAdmins({
+            type: "TERMINAL_STATUS_UPDATE",
+            data: {
+              terminalId: terminal._id,
+              machineId: terminal.machineId || "",
+              deviceKey: terminal.deviceKey || "",
+              isOnline: false,
+              lastSeenAt: terminal.lastSeenAt,
+              updatedAt: new Date(),
+            },
+          });
+
+          broadcastToAdmins({
+            type: "DEVICE_WS",
+            action: "disconnected",
+            deviceKey: terminal.deviceKey || deviceKey || machineId || "",
+            machineId: terminal.machineId || machineId || "",
+          });
+        })
+        .catch(console.error);
+    });
 
     ws.on("message", (data) => {
       try {
@@ -195,13 +244,17 @@ export function createWebSocketServer(server) {
     ws.send(
       JSON.stringify({
         type: "WS_CONNECTED",
-        deviceKey: deviceKey || machineId || deviceMongoId || deviceCode || null,
+        deviceKey:
+          deviceKey || machineId || deviceMongoId || deviceCode || null,
         machineId: machineId || "",
         isAdmin,
         message: "Connected to WebSocket",
       }),
     );
   });
+
+  console.log("[WS] Native WebSocket server mounted on /ws");
+  return wss;
 }
 
 export function broadcast(data) {
@@ -210,7 +263,7 @@ export function broadcast(data) {
   const json = JSON.stringify(data);
 
   wss.clients.forEach((client) => {
-    if (client.readyState === 1) client.send(json);
+    if (isOpen(client)) client.send(json);
   });
 }
 
@@ -220,7 +273,7 @@ export function broadcastToAdmins(data) {
   const json = JSON.stringify(data);
 
   adminClients.forEach((client) => {
-    if (client.readyState === 1) client.send(json);
+    if (isOpen(client)) client.send(json);
   });
 }
 
@@ -230,7 +283,7 @@ export function sendToDevice(deviceKey, data) {
 
   const json = JSON.stringify(data);
   for (const ws of set) {
-    if (ws.readyState === 1) ws.send(json);
+    if (isOpen(ws)) ws.send(json);
   }
 }
 
@@ -258,7 +311,7 @@ export function sendToDeviceBoth(
   const json = JSON.stringify(data);
 
   for (const ws of recipients) {
-    if (ws.readyState === 1) ws.send(json);
+    if (isOpen(ws)) ws.send(json);
   }
 }
 
