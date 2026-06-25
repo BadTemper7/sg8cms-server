@@ -6,62 +6,120 @@ import OutletVideoAssignment from "../models/OutletVideoAssignment.js";
 import Outlet from "../models/Outlet.js";
 import Terminal from "../models/Terminal.js";
 import { broadcast, sendToDevice } from "../wsServer.js";
+import cloudinary from "../config/cloudinary.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const VIDEO_UPLOAD_DIR = path.resolve(__dirname, "../videos/outlet");
+// ============================================
+// CLOUDINARY CONFIGURATION
+// ============================================
+const CLOUDINARY_FOLDER = process.env.CLOUDINARY_FOLDER || "pg-cms/videos";
+const TEMP_UPLOAD_DIR = path.resolve(__dirname, "../temp");
 
-const PUBLIC_SERVER_URL = (
-  process.env.PUBLIC_SERVER_URL ||
-  process.env.SERVER_URL ||
-  "https://ws2.sg8.casino"
-).replace(/\/$/, "");
-
-const getOutletVideoUrl = (filename) =>
-  `${PUBLIC_SERVER_URL}/videos/outlet/${filename}`;
-
-// Ensure the upload directory exists on startup
-if (!fs.existsSync(VIDEO_UPLOAD_DIR)) {
-  fs.mkdirSync(VIDEO_UPLOAD_DIR, { recursive: true });
+// Ensure temp directory exists for multer
+if (!fs.existsSync(TEMP_UPLOAD_DIR)) {
+  fs.mkdirSync(TEMP_UPLOAD_DIR, { recursive: true });
 }
 
+// ============================================
+// HELPER FUNCTIONS
+// ============================================
+const getPublicIdFromUrl = (url) => {
+  if (!url) return null;
+  try {
+    // Extract public_id from Cloudinary URL
+    // Example: https://res.cloudinary.com/dhfy8flur/video/upload/v123/pg-cms/videos/filename.mp4
+    const parts = url.split("/");
+    const filename = parts[parts.length - 1];
+    const publicId = filename.split(".")[0];
+    return `${CLOUDINARY_FOLDER}/${publicId}`;
+  } catch (error) {
+    console.error("Error extracting public_id:", error);
+    return null;
+  }
+};
+
+// ============================================
+// CREATE VIDEO - Upload to Cloudinary
+// ============================================
 export const createVideo = async (req, res) => {
   try {
     const { title, description, active = true } = req.body;
 
-    if (!title) return res.status(400).json({ error: "title is required" });
-    if (!req.file) return res.status(400).json({ error: "file is required" });
+    if (!title) {
+      return res.status(400).json({ error: "title is required" });
+    }
+    if (!req.file) {
+      return res.status(400).json({ error: "file is required" });
+    }
 
-    // Multer already saved the file directly to VIDEO_UPLOAD_DIR
-    const filename = req.file.filename;
-    const originalName = req.file.originalname;
-    const ext = path.extname(originalName);
+    // Upload to Cloudinary
+    console.log(`📤 Uploading video to Cloudinary: ${req.file.originalname}`);
 
+    const result = await cloudinary.uploader.upload(req.file.path, {
+      resource_type: "video",
+      folder: CLOUDINARY_FOLDER,
+      public_id: `video-${Date.now()}`,
+      eager: [{ format: "mp4", quality: "auto" }],
+      eager_async: true,
+    });
+
+    console.log(`✅ Video uploaded to Cloudinary: ${result.public_id}`);
+
+    // Clean up temp file
+    try {
+      fs.unlinkSync(req.file.path);
+      console.log(`🗑️ Deleted temp file: ${req.file.path}`);
+    } catch (err) {
+      console.warn(`⚠️ Could not delete temp file: ${err.message}`);
+    }
+
+    // Create video record in database
     const video = await Video.create({
       title,
       description,
-      filename,
-      originalName,
-      secureUrl: getOutletVideoUrl(filename),
-      bytes: req.file.size,
-      durationSec: 0,
-      format: ext.replace(".", ""),
+      filename: result.public_id,
+      originalName: req.file.originalname,
+      secureUrl: result.secure_url,
+      bytes: result.bytes,
+      durationSec: result.duration || 0,
+      format: result.format || "mp4",
       active: active === "true" || active === true,
+      cloudinaryData: {
+        publicId: result.public_id,
+        version: result.version,
+        resourceType: result.resource_type,
+        url: result.url,
+        secureUrl: result.secure_url,
+        width: result.width,
+        height: result.height,
+        duration: result.duration,
+        format: result.format,
+      },
     });
 
     return res.json(video);
   } catch (e) {
-    // Clean up uploaded file if DB save fails
+    console.error("❌ Error uploading video to Cloudinary:", e);
+
+    // Clean up temp file if exists
     if (req.file?.path) {
       try {
         fs.unlinkSync(req.file.path);
-      } catch {}
+      } catch (err) {}
     }
-    return res.status(500).json({ error: e.message });
+
+    return res.status(500).json({
+      error: e.message,
+      details: e.error?.message || "Cloudinary upload failed",
+    });
   }
 };
 
+// ============================================
+// LIST VIDEOS
+// ============================================
 export const listVideos = async (req, res) => {
   try {
     const filter = {};
@@ -75,6 +133,9 @@ export const listVideos = async (req, res) => {
   }
 };
 
+// ============================================
+// GET SINGLE VIDEO
+// ============================================
 export const getVideo = async (req, res) => {
   try {
     const row = await Video.findById(req.params.videoId).lean();
@@ -85,6 +146,9 @@ export const getVideo = async (req, res) => {
   }
 };
 
+// ============================================
+// UPDATE VIDEO
+// ============================================
 export const updateVideo = async (req, res) => {
   try {
     const row = await Video.findByIdAndUpdate(req.params.videoId, req.body, {
@@ -154,24 +218,32 @@ export const updateVideo = async (req, res) => {
   }
 };
 
+// ============================================
+// DELETE VIDEO - Remove from Cloudinary and Database
+// ============================================
 export const removeVideo = async (req, res) => {
   try {
     const row = await Video.findById(req.params.videoId).lean();
     if (!row) return res.status(404).json({ error: "Video not found" });
 
-    // Delete the physical file from disk first
-    if (row.filename) {
-      const filePath = path.join(VIDEO_UPLOAD_DIR, row.filename);
+    // Delete from Cloudinary
+    if (row.cloudinaryData?.publicId) {
       try {
-        if (fs.existsSync(filePath)) {
-          fs.unlinkSync(filePath);
-          console.log(`Deleted video file: ${filePath}`);
-        }
-      } catch (fileErr) {
-        console.error("Error deleting local video file:", fileErr.message);
+        console.log(
+          `🗑️ Deleting from Cloudinary: ${row.cloudinaryData.publicId}`,
+        );
+        const result = await cloudinary.uploader.destroy(
+          row.cloudinaryData.publicId,
+          { resource_type: "video" },
+        );
+        console.log(`✅ Cloudinary delete result:`, result);
+      } catch (cloudErr) {
+        console.error("❌ Error deleting from Cloudinary:", cloudErr.message);
+        // Continue with database deletion even if Cloudinary fails
       }
     }
 
+    // Delete from database
     await Video.deleteOne({ _id: row._id });
     await OutletVideoAssignment.deleteMany({ videoId: row._id });
 
@@ -189,6 +261,9 @@ export const removeVideo = async (req, res) => {
   }
 };
 
+// ============================================
+// REPLACE VIDEO - Upload new version to Cloudinary
+// ============================================
 export const replaceVideo = async (req, res) => {
   try {
     const row = await Video.findById(req.params.videoId).lean();
@@ -196,23 +271,43 @@ export const replaceVideo = async (req, res) => {
 
     if (!req.file) return res.status(400).json({ error: "file is required" });
 
-    // Multer already saved the new file to VIDEO_UPLOAD_DIR
-    const filename = req.file.filename;
-    const originalName = req.file.originalname;
-    const ext = path.extname(originalName);
-
-    // Delete the old file from disk
-    if (row.filename) {
-      const oldPath = path.join(VIDEO_UPLOAD_DIR, row.filename);
+    // Delete old file from Cloudinary
+    if (row.cloudinaryData?.publicId) {
       try {
-        if (fs.existsSync(oldPath)) {
-          fs.unlinkSync(oldPath);
-          console.log(`Deleted old video file: ${oldPath}`);
-        }
-      } catch (fileErr) {
-        console.error("Could not delete old video file:", fileErr.message);
+        console.log(
+          `🗑️ Deleting old video from Cloudinary: ${row.cloudinaryData.publicId}`,
+        );
+        await cloudinary.uploader.destroy(row.cloudinaryData.publicId, {
+          resource_type: "video",
+        });
+      } catch (cloudErr) {
+        console.error(
+          "⚠️ Could not delete old video from Cloudinary:",
+          cloudErr.message,
+        );
+        // Continue with upload
       }
     }
+
+    // Upload new video to Cloudinary
+    console.log(
+      `📤 Uploading replacement video to Cloudinary: ${req.file.originalname}`,
+    );
+
+    const result = await cloudinary.uploader.upload(req.file.path, {
+      resource_type: "video",
+      folder: CLOUDINARY_FOLDER,
+      public_id: `video-${Date.now()}`,
+      eager: [{ format: "mp4", quality: "auto" }],
+      eager_async: true,
+    });
+
+    console.log(`✅ Replacement video uploaded: ${result.public_id}`);
+
+    // Clean up temp file
+    try {
+      fs.unlinkSync(req.file.path);
+    } catch (err) {}
 
     const { title, description, active } = req.body;
 
@@ -224,11 +319,23 @@ export const replaceVideo = async (req, res) => {
         ...(active !== undefined && {
           active: active === "true" || active === true,
         }),
-        filename,
-        originalName,
-        secureUrl: getOutletVideoUrl(filename),
-        bytes: req.file.size,
-        format: ext.replace(".", ""),
+        filename: result.public_id,
+        originalName: req.file.originalname,
+        secureUrl: result.secure_url,
+        bytes: result.bytes,
+        format: result.format || "mp4",
+        durationSec: result.duration || 0,
+        cloudinaryData: {
+          publicId: result.public_id,
+          version: result.version,
+          resourceType: result.resource_type,
+          url: result.url,
+          secureUrl: result.secure_url,
+          width: result.width,
+          height: result.height,
+          duration: result.duration,
+          format: result.format,
+        },
       },
       { new: true, runValidators: true },
     ).lean();
@@ -273,16 +380,19 @@ export const replaceVideo = async (req, res) => {
 
     return res.json(updated);
   } catch (e) {
-    // Clean up newly uploaded file if update fails
+    // Clean up temp file if upload fails
     if (req.file?.path) {
       try {
         fs.unlinkSync(req.file.path);
-      } catch {}
+      } catch (err) {}
     }
     return res.status(500).json({ error: e.message });
   }
 };
 
+// ============================================
+// GET OUTLETS FOR VIDEO
+// ============================================
 export const getOutletsForVideo = async (req, res) => {
   try {
     const { videoId } = req.params;
@@ -347,6 +457,35 @@ export const getOutletsForVideo = async (req, res) => {
       },
       totalAssignedOutlets: detailed.length,
       assignments: detailed,
+    });
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
+};
+
+// ============================================
+// GET CLOUDINARY SIGNED URL (For secure access)
+// ============================================
+export const getSignedVideoUrl = async (req, res) => {
+  try {
+    const { videoId } = req.params;
+    const video = await Video.findById(videoId).lean();
+
+    if (!video) {
+      return res.status(404).json({ error: "Video not found" });
+    }
+
+    // Generate a signed URL that expires in 1 hour
+    const signedUrl = cloudinary.url(video.cloudinaryData.publicId, {
+      resource_type: "video",
+      sign_url: true,
+      expires_at: Math.floor(Date.now() / 1000) + 3600, // 1 hour from now
+    });
+
+    return res.json({
+      signedUrl,
+      expiresIn: 3600,
+      publicId: video.cloudinaryData.publicId,
     });
   } catch (e) {
     return res.status(500).json({ error: e.message });

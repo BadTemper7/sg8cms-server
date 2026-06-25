@@ -77,14 +77,19 @@ app.use(
   }),
 );
 
-// Serve uploaded outlet videos as static files
-const VIDEO_STATIC_DIR = path.resolve(__dirname, "videos/outlet");
-if (!fs.existsSync(VIDEO_STATIC_DIR)) {
-  fs.mkdirSync(VIDEO_STATIC_DIR, { recursive: true });
-}
-app.use("/videos/outlet", express.static(VIDEO_STATIC_DIR));
+// ============================================
+// TEMP DIRECTORY FOR VIDEO UPLOADS
+// ============================================
+const TEMP_UPLOAD_DIR = path.resolve(__dirname, "temp");
 
-// Serve Electron launcher update files
+if (!fs.existsSync(TEMP_UPLOAD_DIR)) {
+  console.log(`📁 Creating temp directory: ${TEMP_UPLOAD_DIR}`);
+  fs.mkdirSync(TEMP_UPLOAD_DIR, { recursive: true });
+}
+
+// ============================================
+// LAUNCHER UPDATES
+// ============================================
 const LAUNCHER_UPDATES_DIR = path.resolve(__dirname, "launcher-updates");
 
 if (!fs.existsSync(LAUNCHER_UPDATES_DIR)) {
@@ -137,7 +142,9 @@ app.use(
   }),
 );
 
-// Serve RestrictPC download files
+// ============================================
+// RESTRICT PC DOWNLOADS
+// ============================================
 const RESTRICT_PC_DIR = path.resolve(__dirname, "restrict-pc");
 
 if (!fs.existsSync(RESTRICT_PC_DIR)) {
@@ -194,6 +201,10 @@ app.use(
     },
   }),
 );
+
+// ============================================
+// SUPER ADMIN CREATION
+// ============================================
 async function ensureSuperAdmin() {
   try {
     const existing = await User.findOne({ username: "cms_admin" });
@@ -229,56 +240,13 @@ async function ensureSuperAdmin() {
   }
 }
 
-// Routes
-app.get("/api/health", (req, res) => {
-  res.json({ message: "Backend is running" });
-});
-
-app.get("/api/ws-health", (req, res) => {
-  res.json({
-    ok: true,
-    message: "Native WebSocket server is mounted",
-    websocketPath: "/ws",
-    websocketUrl: "wss://ws2.sg8.casino/ws",
-    note: "Do not test this with /socket.io because this backend uses the ws package, not Socket.IO.",
-  });
-});
-
-// app.use("/api/users/login", loginLimiter);
-app.use("/api/notes", noteRoutes);
-app.use("/api/announcements", announcementRoutes);
-app.use("/api/users", userRoutes);
-app.use("/api/banners", bannerRoutes);
-app.use("/api/outlets", outletRoutes);
-app.use("/api/terminals", terminalRoutes);
-app.use("/api/videos", videoRoutes);
-app.use("/api/assignments", outletVideoAssignmentRoutes);
-app.use("/api/playback", playbackRoutes);
-app.use("/api/terminals", terminalDetailsRoutes);
-app.use("/api/departments", departmentRoutes);
-app.use("/api/promotions", promotionDocumentRoutes);
-app.use("/api/upload", uploadRoutes);
-
-// Serve frontend in production
-// if (process.env.NODE_ENV === "production") {
-//   const frontendPath = path.join(__dirname, "../frontend/build");
-//   app.use(express.static(frontendPath));
-
-//   app.get("*", (req, res) => {
-//     res.sendFile(path.join(frontendPath, "index.html"));
-//   });
-// }
-
-const PORT = process.env.PORT || 5000;
-
-const server = http.createServer(app);
-createWebSocketServer(server);
-
+// ============================================
+// USER MODULE MIGRATION
+// ============================================
 async function migrateUserModules() {
   try {
     console.log("🔄 Checking for users without modules field...");
 
-    // Find all users without modules field or with empty modules
     const usersToUpdate = await User.find({
       $or: [{ modules: { $exists: false } }, { modules: { $size: 0 } }],
     });
@@ -290,7 +258,6 @@ async function migrateUserModules() {
 
     console.log(`📝 Found ${usersToUpdate.length} users without modules`);
 
-    // Define default modules based on role
     const defaultModules = {
       superadmin: ["dashboard", "outlets", "promotions", "videoAds", "users"],
       admin: ["dashboard", "outlets", "promotions"],
@@ -301,11 +268,9 @@ async function migrateUserModules() {
     for (const user of usersToUpdate) {
       let modulesToAssign;
 
-      // Superadmin gets all modules
       if (user.roles === "superadmin") {
         modulesToAssign = defaultModules.superadmin;
       } else {
-        // Regular admin gets default modules
         modulesToAssign = defaultModules.admin;
       }
 
@@ -324,6 +289,49 @@ async function migrateUserModules() {
   }
 }
 
+// ============================================
+// ROUTES
+// ============================================
+
+// Health checks
+app.get("/api/health", (req, res) => {
+  res.json({ message: "Backend is running" });
+});
+
+app.get("/api/ws-health", (req, res) => {
+  res.json({
+    ok: true,
+    message: "Native WebSocket server is mounted",
+    websocketPath: "/ws",
+    websocketUrl: "wss://ws2.sg8.casino/ws",
+    note: "Do not test this with /socket.io because this backend uses the ws package, not Socket.IO.",
+  });
+});
+
+// API Routes
+app.use("/api/notes", noteRoutes);
+app.use("/api/announcements", announcementRoutes);
+app.use("/api/users", userRoutes);
+app.use("/api/banners", bannerRoutes);
+app.use("/api/outlets", outletRoutes);
+app.use("/api/terminals", terminalRoutes);
+app.use("/api/videos", videoRoutes);
+app.use("/api/assignments", outletVideoAssignmentRoutes);
+app.use("/api/playback", playbackRoutes);
+app.use("/api/terminals", terminalDetailsRoutes);
+app.use("/api/departments", departmentRoutes);
+app.use("/api/promotions", promotionDocumentRoutes);
+app.use("/api/upload", uploadRoutes);
+
+// ============================================
+// SERVER STARTUP
+// ============================================
+
+const PORT = process.env.PORT || 5000;
+
+const server = http.createServer(app);
+createWebSocketServer(server);
+
 ensureSuperAdmin()
   .then(async () => {
     await migrateUserModules();
@@ -337,7 +345,13 @@ ensureSuperAdmin()
       console.log(
         `⬆️  Launcher updates: http://localhost:${PORT}/launcher-updates/latest.yml\n`,
       );
+      console.log(`📁 Temp upload directory: ${TEMP_UPLOAD_DIR}`);
+      console.log(
+        `☁️  Cloudinary cloud: ${process.env.CLOUDINARY_CLOUD_NAME || "not configured"}`,
+      );
+      console.log(`🎬 Videos will be served from Cloudinary CDN\n`);
 
+      // Uncomment to enable terminal offline check cron job
       // startTerminalOfflineCheck();
     });
   })
@@ -348,6 +362,35 @@ ensureSuperAdmin()
       console.log(
         `⬆️  Launcher updates: http://localhost:${PORT}/launcher-updates/latest.yml\n`,
       );
+      console.log(
+        `☁️  Cloudinary cloud: ${process.env.CLOUDINARY_CLOUD_NAME || "not configured"}`,
+      );
+      // Uncomment to enable terminal offline check cron job
       // startTerminalOfflineCheck();
     });
   });
+
+// ============================================
+// ERROR HANDLING
+// ============================================
+
+// Global error handler
+app.use((err, req, res, next) => {
+  console.error("❌ Global error:", err);
+  res.status(500).json({
+    error: err.message || "Internal server error",
+    stack: process.env.NODE_ENV === "development" ? err.stack : undefined,
+  });
+});
+
+// Handle uncaught exceptions
+process.on("uncaughtException", (error) => {
+  console.error("❌ Uncaught Exception:", error);
+});
+
+// Handle unhandled rejections
+process.on("unhandledRejection", (reason, promise) => {
+  console.error("❌ Unhandled Rejection at:", promise, "reason:", reason);
+});
+
+export default app;

@@ -4,11 +4,15 @@ import { broadcast, sendToDeviceBoth } from "../wsServer.js";
 import mongoose from "mongoose";
 
 function normalizeMachineId(value) {
-  return String(value || "").trim().toUpperCase();
+  return String(value || "")
+    .trim()
+    .toUpperCase();
 }
 
 function normalizeCode(value) {
-  return String(value || "").trim().toUpperCase();
+  return String(value || "")
+    .trim()
+    .toUpperCase();
 }
 
 function isValidObjectId(value) {
@@ -131,9 +135,6 @@ export const registerLauncherTerminal = async (req, res) => {
             terminal.description ||
             `SG8 Launcher ${normalizeCode(nextCode)}`,
           active: true,
-          // Pairing or installer registration must not mark the launcher as running.
-          // The launcher becomes online only when the real runtime opens and sends
-          // /game-launched or heartbeat after boot.
           isOnline: false,
           isLaunchedGame: false,
           lastSeenAt: null,
@@ -164,7 +165,6 @@ export const registerLauncherTerminal = async (req, res) => {
         hostname: String(hostname || "").trim(),
         launcherVersion: String(launcherVersion || "").trim(),
         active: true,
-        // Pairing creates the terminal record only. It does not mean the launcher app is running.
         isOnline: false,
         isLaunchedGame: false,
         lastSeenAt: null,
@@ -186,12 +186,145 @@ export const registerLauncherTerminal = async (req, res) => {
       created = true;
     }
 
+    // ✅ BROADCAST: Send terminal creation/registration event to frontend
+    if (created) {
+      // ✅ New terminal was created - broadcast TERMINAL_REGISTERED
+      broadcast({
+        type: "TERMINAL_REGISTERED",
+        data: {
+          terminalId: terminal._id.toString(),
+          outletId: String(terminal.outletId || ""),
+          code: terminal.code,
+          description: terminal.description,
+          deviceKey: terminal.deviceKey || "",
+          machineId: terminal.machineId || "",
+          isOnline: false,
+          isLaunchedGame: false,
+          isGameDisabled: terminal.isGameDisabled || false,
+          isLocked: terminal.isLocked || false,
+          active: terminal.active,
+          hostname: terminal.hostname || "",
+          launcherVersion: terminal.launcherVersion || "",
+          pairedAt: terminal.pairedAt,
+          createdAt: terminal.createdAt,
+          updatedAt: terminal.updatedAt,
+          terminal: {
+            _id: terminal._id.toString(),
+            outletId: String(terminal.outletId || ""),
+            code: terminal.code,
+            description: terminal.description,
+            deviceKey: terminal.deviceKey || "",
+            machineId: terminal.machineId || "",
+            isOnline: false,
+            isLaunchedGame: false,
+            isGameDisabled: terminal.isGameDisabled || false,
+            isLocked: terminal.isLocked || false,
+            active: terminal.active,
+            hostname: terminal.hostname || "",
+            launcherVersion: terminal.launcherVersion || "",
+            pairedAt: terminal.pairedAt,
+            createdAt: terminal.createdAt,
+            updatedAt: terminal.updatedAt,
+          },
+        },
+      });
+
+      // ✅ Also send TERMINAL_CREATED for compatibility
+      broadcast({
+        type: "TERMINAL_CREATED",
+        data: {
+          terminalId: terminal._id.toString(),
+          outletId: String(terminal.outletId || ""),
+          code: terminal.code,
+          description: terminal.description,
+          deviceKey: terminal.deviceKey || "",
+          machineId: terminal.machineId || "",
+          isOnline: false,
+          isLaunchedGame: false,
+          isGameDisabled: terminal.isGameDisabled || false,
+          isLocked: terminal.isLocked || false,
+          active: terminal.active,
+          terminal: {
+            _id: terminal._id.toString(),
+            outletId: String(terminal.outletId || ""),
+            code: terminal.code,
+            description: terminal.description,
+            deviceKey: terminal.deviceKey || "",
+            machineId: terminal.machineId || "",
+            isOnline: false,
+            isLaunchedGame: false,
+            isGameDisabled: terminal.isGameDisabled || false,
+            isLocked: terminal.isLocked || false,
+            active: terminal.active,
+          },
+        },
+      });
+
+      console.log(
+        `[REGISTER_LAUNCHER] ✅ Broadcasted TERMINAL_REGISTERED for new terminal: ${terminal.code}`,
+      );
+    } else {
+      // ✅ Terminal was updated - broadcast TERMINAL_UPDATED
+      broadcast({
+        type: "TERMINAL_UPDATED",
+        data: {
+          terminalId: terminal._id.toString(),
+          outletId: String(terminal.outletId || ""),
+          code: terminal.code,
+          description: terminal.description,
+          deviceKey: terminal.deviceKey || "",
+          machineId: terminal.machineId || "",
+          isOnline: false,
+          isLaunchedGame: false,
+          isGameDisabled: terminal.isGameDisabled || false,
+          isLocked: terminal.isLocked || false,
+          active: terminal.active,
+          hostname: terminal.hostname || "",
+          launcherVersion: terminal.launcherVersion || "",
+          pairedAt: terminal.pairedAt,
+          updatedAt: terminal.updatedAt,
+          outletChanged: outletChanged,
+          terminal: {
+            _id: terminal._id.toString(),
+            outletId: String(terminal.outletId || ""),
+            code: terminal.code,
+            description: terminal.description,
+            deviceKey: terminal.deviceKey || "",
+            machineId: terminal.machineId || "",
+            isOnline: false,
+            isLaunchedGame: false,
+            isGameDisabled: terminal.isGameDisabled || false,
+            isLocked: terminal.isLocked || false,
+            active: terminal.active,
+          },
+        },
+      });
+
+      console.log(
+        `[REGISTER_LAUNCHER] ✅ Broadcasted TERMINAL_UPDATED for existing terminal: ${terminal.code}`,
+      );
+    }
+
+    // ✅ Also broadcast the status update for real-time online/offline tracking
     const message = buildTerminalUpdateMessage(terminal, {
-      reason: created ? "launcher_registered_inactive" : "launcher_repaired_inactive",
+      reason: created
+        ? "launcher_registered_inactive"
+        : "launcher_repaired_inactive",
       outletChanged,
     });
 
     sendTerminalUpdate(terminal, message);
+
+    // ✅ One more broadcast to ensure frontend refreshes
+    broadcast({
+      type: "ADMIN_REFRESH_TERMINALS",
+      data: {
+        reason: "terminal_registered",
+        terminalId: terminal._id.toString(),
+        outletId: String(terminal.outletId || ""),
+        timestamp: new Date().toISOString(),
+      },
+    });
 
     return res.json({
       ok: true,
@@ -261,6 +394,67 @@ export const createTerminal = async (req, res) => {
     console.log(
       `[CREATE_TERMINAL] Created terminal ${normalizedCode} with device key: ${deviceKey}, isGameDisabled: ${isGameDisabled}`,
     );
+
+    // ✅ BROADCAST: Notify all admin clients about the new terminal
+    const terminalObj = terminal.toObject();
+
+    // Send to all admin WebSocket clients
+    broadcast({
+      type: "TERMINAL_CREATED",
+      data: {
+        terminalId: terminalObj._id.toString(),
+        outletId: outletId,
+        code: terminalObj.code,
+        description: terminalObj.description,
+        deviceKey: terminalObj.deviceKey,
+        isLocked: terminalObj.isLocked || false,
+        isGameDisabled: terminalObj.isGameDisabled || false,
+        isLaunchedGame: terminalObj.isLaunchedGame || false,
+        isOnline: terminalObj.isOnline || false,
+        active: terminalObj.active,
+        createdAt: terminalObj.createdAt,
+        updatedAt: terminalObj.updatedAt,
+        terminal: {
+          _id: terminalObj._id.toString(),
+          code: terminalObj.code,
+          description: terminalObj.description,
+          outletId: outletId,
+          deviceKey: terminalObj.deviceKey,
+          isLocked: terminalObj.isLocked || false,
+          isGameDisabled: terminalObj.isGameDisabled || false,
+          isLaunchedGame: terminalObj.isLaunchedGame || false,
+          isOnline: terminalObj.isOnline || false,
+          active: terminalObj.active,
+          createdAt: terminalObj.createdAt,
+          updatedAt: terminalObj.updatedAt,
+        },
+      },
+    });
+
+    // ✅ Also send a more specific event for the terminal list
+    broadcast({
+      type: "TERMINAL_ADDED",
+      data: {
+        terminalId: terminalObj._id.toString(),
+        outletId: outletId,
+        code: terminalObj.code,
+        deviceKey: terminalObj.deviceKey,
+        terminal: {
+          _id: terminalObj._id.toString(),
+          code: terminalObj.code,
+          description: terminalObj.description,
+          outletId: outletId,
+          deviceKey: terminalObj.deviceKey,
+          isLocked: terminalObj.isLocked || false,
+          isGameDisabled: terminalObj.isGameDisabled || false,
+          isLaunchedGame: terminalObj.isLaunchedGame || false,
+          isOnline: terminalObj.isOnline || false,
+          active: terminalObj.active,
+          createdAt: terminalObj.createdAt,
+          updatedAt: terminalObj.updatedAt,
+        },
+      },
+    });
 
     return res.json(terminal);
   } catch (e) {
@@ -479,7 +673,8 @@ export const listTerminals = async (req, res) => {
     if (req.query.outletId) filter.outletId = req.query.outletId;
     if (req.query.active === "true") filter.active = true;
     if (req.query.active === "false") filter.active = false;
-    if (req.query.machineId) filter.machineId = normalizeMachineId(req.query.machineId);
+    if (req.query.machineId)
+      filter.machineId = normalizeMachineId(req.query.machineId);
 
     const rows = await Terminal.find(filter).sort({ createdAt: -1 }).lean();
     return res.json(rows);
@@ -565,7 +760,9 @@ export const heartbeatTerminal = async (req, res) => {
     if (wasOffline) {
       sendTerminalUpdate(
         updatedTerminal,
-        buildTerminalUpdateMessage(updatedTerminal, { reason: "heartbeat_online" }),
+        buildTerminalUpdateMessage(updatedTerminal, {
+          reason: "heartbeat_online",
+        }),
       );
 
       broadcast({
@@ -671,7 +868,8 @@ export const removeTerminal = async (req, res) => {
     });
 
     return res.json({
-      message: "Terminal deleted. Launcher identity will regenerate on that PC.",
+      message:
+        "Terminal deleted. Launcher identity will regenerate on that PC.",
       terminalId: row._id.toString(),
       machineId: row.machineId || "",
       deviceKey: row.deviceKey || "",

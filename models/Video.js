@@ -2,23 +2,59 @@ import mongoose from "mongoose";
 
 const videoSchema = new mongoose.Schema(
   {
-    title: { type: String, required: true, trim: true },
-    description: { type: String, trim: true },
-
-    // Local file info
-    filename: { type: String, required: true, trim: true }, // unique name on disk
-    originalName: { type: String, trim: true, default: "" }, // original upload name
-
-    // Relative URL served by Express static middleware
-    secureUrl: { type: String, required: true, trim: true },
-
-    format: { type: String, trim: true, default: "" },
-    bytes: { type: Number, default: 0 },
-    durationSec: { type: Number, default: 0 },
-
-    active: { type: Boolean, default: true },
+    title: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    description: {
+      type: String,
+      trim: true,
+    },
+    filename: {
+      type: String,
+      required: true,
+    },
+    originalName: {
+      type: String,
+      required: true,
+    },
+    secureUrl: {
+      type: String,
+      required: true,
+    },
+    bytes: {
+      type: Number,
+      default: 0,
+    },
+    durationSec: {
+      type: Number,
+      default: 0,
+    },
+    format: {
+      type: String,
+      default: "mp4",
+    },
+    active: {
+      type: Boolean,
+      default: true,
+    },
+    // Cloudinary specific data
+    cloudinaryData: {
+      publicId: String,
+      version: Number,
+      resourceType: String,
+      url: String,
+      secureUrl: String,
+      width: Number,
+      height: Number,
+      duration: Number,
+      format: String,
+    },
   },
-  { timestamps: true },
+  {
+    timestamps: true,
+  },
 );
 
 export default mongoose.model("Video", videoSchema);
